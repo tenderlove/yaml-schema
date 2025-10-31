@@ -2,6 +2,7 @@
 
 module YAMLSchema
   class Validator
+    class Exception < StandardError; end
     class UnexpectedType < Exception; end
     class UnexpectedProperty < Exception; end
     class UnexpectedTag < Exception; end
