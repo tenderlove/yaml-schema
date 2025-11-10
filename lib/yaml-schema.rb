@@ -175,7 +175,15 @@ module YAMLSchema
             return valid if valid.exception
 
             sub_schema = properties.delete(key.value) {
-              return make_error UnexpectedProperty, "unknown property #{key.value.dump}", path
+              if schema["additionalProperties"]
+                if schema["items"]
+                  schema["items"]
+                else
+                  raise InvalidSchema, "objects must specify items or properties"
+                end
+              else
+                return make_error UnexpectedProperty, "unknown property #{key.value.dump}", path
+              end
             }
             valid = _validate(sub_schema["type"], sub_schema, val, valid, aliases, path + [key.value])
 

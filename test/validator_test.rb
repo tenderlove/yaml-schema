@@ -5,6 +5,29 @@ require "psych"
 module YAMLSchema
   class Validator
     class ErrorTest < Minitest::Test
+      def test_additional_properties
+        ast = Psych.parse("---\n  hello: world\n  foo: bar")
+        assert_raises UnexpectedProperty do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "hello" => { "type" => "string" },
+            },
+            "items" => { "type" => "string" }
+          }, ast.children.first)
+        end
+
+        ast = Psych.parse("---\n  hello: world\n  foo: bar")
+        assert Validator.validate({
+          "type" => "object",
+          "properties" => {
+            "hello" => { "type" => "string" },
+          },
+          "items" => { "type" => "string" },
+          "additionalProperties" => true
+        }, ast.children.first)
+      end
+
       def test_string_min_length
         ast = Psych.parse("--- hello")
         assert_raises InvalidString do
