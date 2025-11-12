@@ -10,12 +10,12 @@ permissions:
 
 jobs:
   push:
-    if: github.repository == 'tenderlove/bitz'
+    if: github.repository == 'tenderlove/yaml-schema'
     runs-on: ubuntu-latest
 
     environment:
       name: rubygems.org
-      url: https://rubygems.org/gems/bitz
+      url: https://rubygems.org/gems/yaml-schema
 
     permissions:
       contents: write
