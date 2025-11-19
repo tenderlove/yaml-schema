@@ -5,6 +5,56 @@ require "psych"
 module YAMLSchema
   class Validator
     class ErrorTest < Minitest::Test
+      def test_accept_non_strings
+        [Float::INFINITY, -Float::INFINITY, Float::NAN].each do |v|
+          ast = Psych.parse(Psych.dump({ "foo" => v }))
+          assert Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => { "type" => "float" },
+            },
+          }, ast.children.first)
+        end
+
+        ast = Psych.parse(Psych.dump({ "foo" => Time.now }))
+        assert Validator.validate({
+          "type" => "object",
+          "properties" => {
+            "foo" => { "type" => "time" },
+          },
+        }, ast.children.first)
+
+        ast = Psych.parse(Psych.dump({ "foo" => Date.today }))
+        assert Validator.validate({
+          "type" => "object",
+          "properties" => {
+            "foo" => { "type" => "date" },
+          },
+        }, ast.children.first)
+
+        ast = Psych.parse(Psych.dump({ "foo" => :foo }))
+        assert Validator.validate({
+          "type" => "object",
+          "properties" => {
+            "foo" => { "type" => "symbol" },
+          },
+        }, ast.children.first)
+      end
+
+      def test_reject_non_strings
+        [Float::INFINITY, -Float::INFINITY, Float::NAN, Time.now, Date.today, :foo].each do |v|
+          ast = Psych.parse(Psych.dump({ "foo" => v }))
+          assert_raises UnexpectedValue do
+            Validator.validate({
+              "type" => "object",
+              "properties" => {
+                "foo" => { "type" => "string" },
+              },
+            }, ast.children.first)
+          end
+        end
+      end
+
       def test_property_max_length
         ast = Psych.parse("---\n  hello: world")
         assert_raises InvalidString do

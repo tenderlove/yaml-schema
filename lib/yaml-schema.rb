@@ -212,36 +212,6 @@ module YAMLSchema
             raise InvalidSchema, "objects must specify items or properties"
           end
         end
-      when "string"
-        unless node.scalar?
-          return make_error UnexpectedType, "expected Scalar, got #{node.class.name.dump}", path
-        end
-
-        unless node.quoted || node.tag == "!str"
-          if node.value == "false" || node.value == "true"
-            return make_error UnexpectedValue, "expected string, got boolean", path
-          end
-
-          if node.value == ""
-            return make_error UnexpectedValue, "expected string, got null", path
-          end
-
-          if node.value.match?(/^[-+]?(?:0|[1-9](?:[0-9]|,[0-9]|_[0-9])*)$/)
-            return make_error UnexpectedValue, "expected string, got integer", path
-          end
-        end
-
-        if schema["maxLength"] && node.value.bytesize > schema["maxLength"]
-          return make_error InvalidString, "expected string length to be <= #{schema["maxLength"]}", path
-        end
-
-        if schema["minLength"] && node.value.bytesize < schema["minLength"]
-          return make_error InvalidString, "expected string length to be >= #{schema["minLength"]}", path
-        end
-
-        if schema["pattern"] && !(node.value.match?(schema["pattern"]))
-          return make_error InvalidString, "expected string to match #{schema["pattern"]}", path
-        end
       when "array"
         unless node.sequence?
           return make_error UnexpectedType, "expected Sequence, got #{node.class.name.dump}", path
@@ -268,36 +238,118 @@ module YAMLSchema
         else
           raise NotImplementedError
         end
-      when "null"
+      else
         unless node.scalar?
           return make_error UnexpectedType, "expected Scalar, got #{node.class.name.dump}", path
         end
 
-        unless node.value == ""
-          return make_error UnexpectedValue, "expected empty string, got #{node.value.dump}", path
+        if type == "string"
+          unless node.quoted || node.tag == "!str"
+            type = extract_type(node.value)
+
+            if type != :string
+              return make_error UnexpectedValue, "expected string, got #{type}", path
+            end
+          end
+
+          if schema["maxLength"] && node.value.bytesize > schema["maxLength"]
+            return make_error InvalidString, "expected string length to be <= #{schema["maxLength"]}", path
+          end
+
+          if schema["minLength"] && node.value.bytesize < schema["minLength"]
+            return make_error InvalidString, "expected string length to be >= #{schema["minLength"]}", path
+          end
+
+          if schema["pattern"] && !(node.value.match?(schema["pattern"]))
+            return make_error InvalidString, "expected string '#{node.value.dump}' to match #{schema["pattern"]}", path
+          end
+        else
+          if node.quoted
+            return make_error UnexpectedValue, "expected #{type}, got string", path
+          end
+
+          case type
+          when "null"
+            unless node.value == ""
+              return make_error UnexpectedValue, "expected empty string, got #{node.value.dump}", path
+            end
+          when "boolean"
+            unless node.value == "false" || node.value == "true"
+              return make_error UnexpectedValue, "expected 'true' or 'false' for boolean", path
+            end
+          when "integer", "float", "time", "date", "symbol"
+            found_type = extract_type(node.value)
+            unless found_type == type.to_sym
+              return make_error UnexpectedValue, "expected #{type}, got #{type}", path
+            end
+          else
+            raise "unknown type #{schema["type"]}"
+          end
         end
-      when "boolean"
-        unless node.scalar?
-          return make_error UnexpectedType, "expected Scalar, got #{node.class.name.dump}", path
-        end
-        unless node.value == "false" || node.value == "true"
-          return make_error UnexpectedValue, "expected 'true' or 'false' for boolean", path
-        end
-      when "integer"
-        unless node.scalar?
-          return make_error UnexpectedType, "expected Scalar, got #{node.class.name.dump}", path
-        end
-        if node.quoted
-          return make_error UnexpectedValue, "expected integer, got string", path
-        end
-        unless node.value.match?(/^[-+]?(?:0|[1-9](?:[0-9]|,[0-9]|_[0-9])*)$/)
-          return make_error UnexpectedValue, "expected integer, got string", path
-        end
-      else
-        raise "unknown type #{schema["type"]}"
       end
 
       valid
+    end
+
+    # Taken from http://yaml.org/type/timestamp.html
+    TIME = /^-?\d{4}-\d{1,2}-\d{1,2}(?:[Tt]|\s+)\d{1,2}:\d\d:\d\d(?:\.\d*)?(?:\s*(?:Z|[-+]\d{1,2}:?(?:\d\d)?))?$/
+
+    # Taken from http://yaml.org/type/float.html
+    # Base 60, [-+]inf and NaN are handled separately
+    FLOAT = /^(?:[-+]?([0-9][0-9_,]*)?\.[0-9]*([eE][-+][0-9]+)?(?# base 10))$/x
+
+    # Taken from http://yaml.org/type/int.html and modified to ensure at least one numerical symbol exists
+    INTEGER_STRICT = /^(?:[-+]?0b[_]*[0-1][0-1_]*             (?# base 2)
+                         |[-+]?0[_]*[0-7][0-7_]*              (?# base 8)
+                         |[-+]?(0|[1-9][0-9_]*)               (?# base 10)
+                         |[-+]?0x[_]*[0-9a-fA-F][0-9a-fA-F_]* (?# base 16))$/x
+
+    # Tokenize +string+ returning the Ruby object
+    def extract_type(string)
+      return :null if string.empty?
+      # Check for a String type, being careful not to get caught by hash keys, hex values, and
+      # special floats (e.g., -.inf).
+      if string.match?(%r{^[^\d.:-]?[[:alpha:]_\s!@#$%\^&*(){}<>|/\\~;=]+}) || string.match?(/\n/)
+        return :string if string.length > 5
+
+        if string.match?(/^[^ytonf~]/i)
+          :string
+        elsif string == '~' || string.match?(/^null$/i)
+          :null
+        elsif string.match?(/^(yes|true|on)$/i)
+          :boolean
+        elsif string.match?(/^(no|false|off)$/i)
+          :boolean
+        else
+          :string
+        end
+      elsif string.match?(TIME)
+        :time
+      elsif string.match?(/^\d{4}-(?:1[012]|0\d|\d)-(?:[12]\d|3[01]|0\d|\d)$/)
+        :date
+      elsif string.match?(/^\+?\.inf$/i)
+        :float
+      elsif string.match?(/^-\.inf$/i)
+        :float
+      elsif string.match?(/^\.nan$/i)
+        :float
+      elsif string.match?(/^:./)
+        :symbol
+      elsif string.match?(/^[-+]?[0-9][0-9_]*(:[0-5]?[0-9]){1,2}$/)
+        :sexagesimal
+      elsif string.match?(/^[-+]?[0-9][0-9_]*(:[0-5]?[0-9]){1,2}\.[0-9_]*$/)
+        :sexagesimal
+      elsif string.match?(FLOAT)
+        if string.match?(/\A[-+]?\.\Z/)
+          :string
+        else
+          :float
+        end
+      elsif string.match?(INTEGER_STRICT)
+        :integer
+      else
+        :string
+      end
     end
   end
 end
