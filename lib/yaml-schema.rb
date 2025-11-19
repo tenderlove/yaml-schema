@@ -70,6 +70,7 @@ module YAMLSchema
     class UnexpectedValue < Exception; end
     class InvalidSchema < Exception; end
     class InvalidString < Exception; end
+    class InvalidPattern < Exception; end
     class MissingRequiredField < Exception; end
 
     Valid = Struct.new(:exception).new.freeze
@@ -188,6 +189,7 @@ module YAMLSchema
                 return make_error UnexpectedProperty, "unknown property #{key.value.dump}", path
               end
             }
+
             valid = _validate(sub_schema["type"], sub_schema, val, valid, aliases, path + [key.value])
 
             return valid if valid.exception
@@ -261,11 +263,15 @@ module YAMLSchema
           end
 
           if schema["pattern"] && !(node.value.match?(schema["pattern"]))
-            return make_error InvalidString, "expected string '#{node.value.dump}' to match #{schema["pattern"]}", path
+            return make_error InvalidPattern, "expected string '#{node.value.dump}' to match #{schema["pattern"]}", path
           end
         else
           if node.quoted
             return make_error UnexpectedValue, "expected #{type}, got string", path
+          end
+
+          if schema["pattern"] && !(node.value.match?(schema["pattern"]))
+            return make_error InvalidPattern, "expected '#{node.value.dump}' to match #{schema["pattern"]}", path
           end
 
           case type

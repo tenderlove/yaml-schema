@@ -5,6 +5,113 @@ require "psych"
 module YAMLSchema
   class Validator
     class ErrorTest < Minitest::Test
+      def test_pattern_symbol
+        ast = Psych.parse(Psych.dump({ "foo" => :foo }))
+
+        assert_raises InvalidPattern do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => {
+                "type" => "symbol",
+                "pattern" => /\A:bar\z/
+              },
+            },
+          }, ast.children.first)
+        end
+      end
+      def test_pattern_time
+        ast = Psych.parse(Psych.dump({ "foo" => Time.now }))
+
+        assert_raises InvalidPattern do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => {
+                "type" => "time",
+                "pattern" => /\Ayay\z/
+              },
+            },
+          }, ast.children.first)
+        end
+      end
+
+      def test_pattern_null
+        ast = Psych.parse(Psych.dump({ "foo" => nil }))
+
+        assert_raises InvalidPattern do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => {
+                "type" => "null",
+                "pattern" => /\Anotnull\z/
+              },
+            },
+          }, ast.children.first)
+        end
+      end
+
+      def test_pattern_float
+        ast = Psych.parse(Psych.dump({ "foo" => 1.2 }))
+
+        assert_raises InvalidPattern do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => {
+                "type" => "float",
+                "pattern" => /\A1\.3\z/
+              },
+            },
+          }, ast.children.first)
+        end
+      end
+
+      def test_pattern_boolean
+        yaml = "---\n foo: true"
+        ast = Psych.parse(yaml)
+
+        assert_raises InvalidPattern do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => {
+                "type" => "boolean",
+                "pattern" => /\Atru\z/
+              },
+            },
+          }, ast.children.first)
+        end
+      end
+
+      def test_pattern_date
+        yaml = "---\n foo: 2025-11-19"
+
+        ast = Psych.parse(yaml)
+        assert Validator.validate({
+          "type" => "object",
+          "properties" => {
+            "foo" => {
+              "type" => "date",
+              "pattern" => /\A2025-11-19\z/
+            },
+          },
+        }, ast.children.first)
+
+        assert_raises InvalidPattern do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => {
+                "type" => "date",
+                "pattern" => /\A2025-11-20\z/
+              },
+            },
+          }, ast.children.first)
+        end
+      end
+
       def test_accept_non_strings
         [Float::INFINITY, -Float::INFINITY, Float::NAN].each do |v|
           ast = Psych.parse(Psych.dump({ "foo" => v }))
@@ -171,7 +278,7 @@ module YAMLSchema
 
       def test_regular_expression
         ast = Psych.parse("bar")
-        assert_raises InvalidString do
+        assert_raises InvalidPattern do
           Validator.validate({
             "type" => "string",
             "pattern" => /foo/
