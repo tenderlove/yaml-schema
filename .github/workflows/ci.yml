@@ -7,6 +7,8 @@ on:
 jobs:
   ruby-versions:
     uses: ruby/actions/.github/workflows/ruby_versions.yml@master
+    with:
+      engine: cruby
 
   test:
     needs: ruby-versions
