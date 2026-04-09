@@ -289,7 +289,7 @@ module YAMLSchema
             when "integer", "float", "time", "date", "symbol"
               found_type = extract_type(node.value)
               unless found_type == type.to_sym
-                return make_error UnexpectedValue, "expected #{type}, got #{type}", path
+                return make_error UnexpectedValue, "expected #{type}, got #{found_type}", path
               end
             else
               raise "unknown type #{schema["type"]}"
