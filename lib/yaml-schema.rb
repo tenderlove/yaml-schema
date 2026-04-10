@@ -79,17 +79,17 @@ module YAMLSchema
     ##
     # Given a particular schema, validate that the node conforms to the
     # schema. Raises an exception if it is invalid
-    def self.validate(schema, node, aliases: true)
+    def self.validate schema, node, aliases: true
       INSTANCE.validate schema, node, aliases: aliases
     end
 
     module NodeInfo # :nodoc:
-      def self.read_tag(node)
+      def self.read_tag node
         node.tag
       end
     end
 
-    def initialize(node_info = NodeInfo)
+    def initialize node_info = NodeInfo
       @node_info = node_info
     end
 
@@ -98,7 +98,7 @@ module YAMLSchema
     ##
     # Given a particular schema, validate that the node conforms to the
     # schema. Raises an exception if it is invalid
-    def validate(schema, node, aliases: true)
+    def validate schema, node, aliases: true
       val = _validate(schema["type"], schema, node, Valid, {}, [], aliases)
       if val.exception
         raise val
@@ -110,7 +110,7 @@ module YAMLSchema
     ##
     # Given a particular schema, validate that the node conforms to the
     # schema. Returns an error object if the node is invalid, otherwise false.
-    def invalid?(schema, node, aliases: true)
+    def invalid? schema, node, aliases: true
       res = _validate(schema["type"], schema, node, Valid, {}, [], aliases)
       if Valid == res
         false
@@ -121,13 +121,13 @@ module YAMLSchema
 
     private
 
-    def make_error(klass, msg, path)
+    def make_error klass, msg, path
       ex = klass.new msg + " path: /#{path.join("/")}"
       ex.set_backtrace caller
       ex
     end
 
-    def _validate(type, schema, node, valid, aliases, path, allow_aliases)
+    def _validate type, schema, node, valid, aliases, path, allow_aliases
       return valid if valid.exception
 
       if node.anchor
@@ -315,7 +315,7 @@ module YAMLSchema
                          |[-+]?0x[_]*[0-9a-fA-F][0-9a-fA-F_]* (?# base 16))$/x
 
     # Tokenize +string+ returning the Ruby object
-    def extract_type(string)
+    def extract_type string
       return :null if string.empty?
       # Check for a String type, being careful not to get caught by hash keys, hex values, and
       # special floats (e.g., -.inf).
