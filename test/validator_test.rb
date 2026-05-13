@@ -322,7 +322,10 @@ module YAMLSchema
         assert_raises UnexpectedTag do
           Validator.validate({
             "type" => "object",
-            "tag" => "aaron"
+            "tag" => "aaron",
+            "properties" => {
+              "foo" => { "type" => "string" }
+            }
           }, ast.children.first)
         end
       end
@@ -332,7 +335,10 @@ module YAMLSchema
         ex = assert_raises UnexpectedTag do
           Validator.validate({
             "type" => "object",
-            "tag" => "aaron"
+            "tag" => "aaron",
+            "properties" => {
+              "foo" => { "type" => "string" }
+            }
           }, ast.children.first)
         end
         assert_match(/lolol/, ex.message)
@@ -351,6 +357,9 @@ module YAMLSchema
         ex = assert_raises UnexpectedType do
           Validator.validate({
             "type" => "object",
+            "properties" => {
+              "foo" => { "type" => "string" }
+            }
           }, ast.children.first)
         end
         assert_match(/Mapping/, ex.message)
@@ -359,6 +368,7 @@ module YAMLSchema
         ex = assert_raises UnexpectedType do
           Validator.validate({
             "type" => "array",
+            "items" => { "type" => "string" }
           }, ast.children.first)
         end
         assert_match(/Sequence/, ex.message)
@@ -729,6 +739,135 @@ bar: *1
             "foo" => { "type" => "string" }
           }
         }, ast.children.first)
+      end
+    end
+
+    class SchemaValidationTest < Minitest::Test
+      def test_missing_type
+        assert_raises InvalidSchema do
+          Validator.validate({}, Psych.parse("foo").children.first)
+        end
+      end
+
+      def test_invalid_type_value
+        assert_raises InvalidSchema do
+          Validator.validate({ "type" => 42 }, Psych.parse("foo").children.first)
+        end
+      end
+
+      def test_unknown_type
+        assert_raises InvalidSchema do
+          Validator.validate({ "type" => "map" }, Psych.parse("foo").children.first)
+        end
+      end
+
+      def test_object_without_properties_or_items
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "object",
+          }, Psych.parse("foo: bar").children.first)
+        end
+      end
+
+      def test_array_without_items_or_prefix
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "array",
+          }, Psych.parse("- foo").children.first)
+        end
+      end
+
+      def test_invalid_required_type
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "object",
+            "properties" => { "foo" => { "type" => "string" } },
+            "required" => "foo",
+          }, Psych.parse("foo: bar").children.first)
+        end
+      end
+
+      def test_invalid_min_length_type
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "string",
+            "minLength" => "5",
+          }, Psych.parse("foo").children.first)
+        end
+      end
+
+      def test_invalid_max_items_type
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "array",
+            "items" => { "type" => "string" },
+            "maxItems" => "2",
+          }, Psych.parse("- foo").children.first)
+        end
+      end
+
+      def test_invalid_pattern_type
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "string",
+            "pattern" => "foo",
+          }, Psych.parse("foo").children.first)
+        end
+      end
+
+      def test_invalid_tag_type
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "object",
+            "tag" => 42,
+            "properties" => { "foo" => { "type" => "string" } },
+          }, Psych.parse("foo: bar").children.first)
+        end
+      end
+
+      def test_invalid_nested_schema
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "object",
+            "properties" => {
+              "foo" => { "type" => "bogus" }
+            }
+          }, Psych.parse("foo: bar").children.first)
+        end
+      end
+
+      def test_invalid_prefix_items_type
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "array",
+            "prefixItems" => { "type" => "string" },
+          }, Psych.parse("- foo").children.first)
+        end
+      end
+
+      def test_invalid_additional_properties_type
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => "object",
+            "properties" => { "foo" => { "type" => "string" } },
+            "additionalProperties" => "string",
+          }, Psych.parse("foo: bar").children.first)
+        end
+      end
+
+      def test_valid_union_types
+        ast = Psych.parse("foo")
+        assert Validator.validate({
+          "type" => ["null", "string"],
+        }, ast.children.first)
+      end
+
+      def test_invalid_union_type_entry
+        assert_raises InvalidSchema do
+          Validator.validate({
+            "type" => ["string", "bogus"],
+          }, Psych.parse("foo").children.first)
+        end
       end
     end
   end

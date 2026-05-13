@@ -95,10 +95,13 @@ module YAMLSchema
 
     INSTANCE = new.freeze
 
+    VALID_TYPES = %w[object array string integer float boolean null date time symbol].freeze
+
     ##
     # Given a particular schema, validate that the node conforms to the
     # schema. Raises an exception if it is invalid
     def validate schema, node, aliases: true
+      validate_schema!(schema)
       val = _validate(schema["type"], schema, node, Valid, {}, [], aliases)
       if val.exception
         raise val
@@ -111,6 +114,7 @@ module YAMLSchema
     # Given a particular schema, validate that the node conforms to the
     # schema. Returns an error object if the node is invalid, otherwise false.
     def invalid? schema, node, aliases: true
+      validate_schema!(schema)
       res = _validate(schema["type"], schema, node, Valid, {}, [], aliases)
       if Valid == res
         false
@@ -119,7 +123,113 @@ module YAMLSchema
       end
     end
 
+    ##
+    # Validates a schema definition, raising InvalidSchema if it is malformed.
+    def validate_schema! schema, path = ""
+      raise InvalidSchema, "schema must be a Hash#{_sp path}" unless Hash === schema
+
+      type = schema["type"]
+      raise InvalidSchema, "schema must have a \"type\" key#{_sp path}" unless type
+
+      types = Array === type ? type : [type]
+      types.each do |t|
+        raise InvalidSchema, "type must be a String, got #{t.class}#{_sp path}" unless String === t
+        raise InvalidSchema, "unknown type #{t.dump}#{_sp path}" unless VALID_TYPES.include?(t)
+      end
+
+      if schema["tag"]
+        raise InvalidSchema, "\"tag\" must be a String#{_sp path}" unless String === schema["tag"]
+      end
+
+      if schema["pattern"]
+        raise InvalidSchema, "\"pattern\" must be a Regexp#{_sp path}" unless Regexp === schema["pattern"]
+      end
+
+      types.each do |t|
+        case t
+        when "object"
+          _validate_object_schema(schema, path)
+        when "array"
+          _validate_array_schema(schema, path)
+        else
+          _validate_scalar_schema(schema, path)
+        end
+      end
+    end
+
     private
+
+    def _sp path
+      path.empty? ? "" : " at #{path}"
+    end
+
+    def _validate_object_schema schema, path
+      if schema["properties"]
+        raise InvalidSchema, "\"properties\" must be a Hash#{_sp path}" unless Hash === schema["properties"]
+        schema["properties"].each do |key, sub|
+          raise InvalidSchema, "property name must be a String#{_sp path}" unless String === key
+          validate_schema!(sub, "#{path}/#{key}")
+        end
+      elsif schema["items"]
+        # items-based object (homogeneous key-value)
+      else
+        raise InvalidSchema, "objects must specify \"items\" or \"properties\"#{_sp path}"
+      end
+
+      if schema["items"] && !schema["properties"]
+        raise InvalidSchema, "\"items\" must be a Hash#{_sp path}" unless Hash === schema["items"]
+        validate_schema!(schema["items"], "#{path}/items")
+      end
+
+      if schema["additionalProperties"]
+        raise InvalidSchema, "\"additionalProperties\" must be a Hash#{_sp path}" unless Hash === schema["additionalProperties"]
+        validate_schema!(schema["additionalProperties"], "#{path}/additionalProperties")
+      end
+
+      if schema["propertyNames"]
+        raise InvalidSchema, "\"propertyNames\" must be a Hash#{_sp path}" unless Hash === schema["propertyNames"]
+        validate_schema!(schema["propertyNames"], "#{path}/propertyNames") if schema["propertyNames"]["type"]
+      end
+
+      if schema["required"]
+        raise InvalidSchema, "\"required\" must be an Array#{_sp path}" unless Array === schema["required"]
+        schema["required"].each do |r|
+          raise InvalidSchema, "\"required\" entries must be Strings#{_sp path}" unless String === r
+        end
+      end
+    end
+
+    def _validate_array_schema schema, path
+      if schema["items"]
+        raise InvalidSchema, "\"items\" must be a Hash#{_sp path}" unless Hash === schema["items"]
+        validate_schema!(schema["items"], "#{path}/items")
+      elsif schema["prefixItems"]
+        raise InvalidSchema, "\"prefixItems\" must be an Array#{_sp path}" unless Array === schema["prefixItems"]
+        schema["prefixItems"].each_with_index do |sub, i|
+          validate_schema!(sub, "#{path}/prefixItems/#{i}")
+        end
+      else
+        raise InvalidSchema, "arrays must specify \"items\" or \"prefixItems\"#{_sp path}"
+      end
+
+      if schema["minItems"]
+        raise InvalidSchema, "\"minItems\" must be an Integer#{_sp path}" unless Integer === schema["minItems"]
+      end
+
+      if schema["maxItems"]
+        raise InvalidSchema, "\"maxItems\" must be an Integer#{_sp path}" unless Integer === schema["maxItems"]
+      end
+    end
+
+    def _validate_scalar_schema schema, path
+      if schema["minLength"]
+        raise InvalidSchema, "\"minLength\" must be an Integer#{_sp path}" unless Integer === schema["minLength"]
+      end
+
+      if schema["maxLength"]
+        raise InvalidSchema, "\"maxLength\" must be an Integer#{_sp path}" unless Integer === schema["maxLength"]
+      end
+    end
 
     def make_error klass, msg, path
       ex = klass.new msg + " path: /#{path.join("/")}"
