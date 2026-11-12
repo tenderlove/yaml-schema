@@ -83,6 +83,31 @@ schema = {
 }
 ```
 
+### Compiled Validators
+
+If you validate many documents against the same schema, you can compile the
+schema into a validator class specialized for it, rather than interpreting
+the schema on every call:
+
+```ruby
+PersonValidator = YAMLSchema::Compiler.compile(schema)
+
+PersonValidator.validate(node)          # raises on error, returns true otherwise
+PersonValidator.invalid?(node)          # returns the error, or false
+PersonValidator.validate(node, aliases: false)
+PersonValidator.new(node_info).validate(node)
+```
+
+Compiled validators raise the same exceptions with the same messages as
+`YAMLSchema::Validator`. The schema itself is validated at compile time.
+
+You can also generate Ruby source and check it into your project:
+
+```ruby
+File.write "person_validator.rb",
+  YAMLSchema::Compiler.to_ruby(schema, class_name: "PersonValidator")
+```
+
 ## Error Handling
 
 Validation errors include detailed path information:

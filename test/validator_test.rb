@@ -478,6 +478,17 @@ module YAMLSchema
         end
       end
 
+      def test_extra_prefix_items_are_allowed
+        ast = Psych.parse("- foo\n- 1\n- extra")
+        assert Validator.validate({
+          "type" => "array",
+          "prefixItems" => [
+            { "type" => "string" },
+            { "type" => "integer" },
+          ]
+        }, ast.children.first)
+      end
+
       def test_invalid_string
         ast = Psych.parse("1")
         assert_raises UnexpectedValue do

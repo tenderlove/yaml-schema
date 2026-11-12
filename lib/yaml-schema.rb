@@ -345,7 +345,8 @@ module YAMLSchema
             valid = _validate sub_schema["type"], sub_schema, item, valid, aliases, path + [i], allow_aliases
           }
         elsif schema["prefixItems"]
-          node.children.each_with_index { |item, i|
+          # Items beyond the end of prefixItems are not validated
+          node.children.first(schema["prefixItems"].length).each_with_index { |item, i|
             sub_schema = schema["prefixItems"][i]
             valid = _validate sub_schema["type"], sub_schema, item, valid, aliases, path + [i], allow_aliases
           }
@@ -424,8 +425,12 @@ module YAMLSchema
                          |[-+]?(0|[1-9][0-9_]*)               (?# base 10)
                          |[-+]?0x[_]*[0-9a-fA-F][0-9a-fA-F_]* (?# base 16))$/x
 
-    # Tokenize +string+ returning the Ruby object
     def extract_type string
+      Validator.extract_type string
+    end
+
+    # Tokenize +string+ returning the Ruby object
+    def self.extract_type string
       return :null if string.empty?
       # Check for a String type, being careful not to get caught by hash keys, hex values, and
       # special floats (e.g., -.inf).
@@ -473,3 +478,5 @@ module YAMLSchema
     end
   end
 end
+
+require "yaml-schema/compiler"
