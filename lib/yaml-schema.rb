@@ -3,7 +3,7 @@
 require "yaml-schema/runtime"
 
 module YAMLSchema
-  VERSION = "1.2.1"
+  VERSION = "1.3.0"
 
   class Pointer
     include Enumerable
