@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "yaml-schema/runtime"
+
 module YAMLSchema
   VERSION = "1.2.1"
 
@@ -63,6 +65,8 @@ module YAMLSchema
   end
 
   class Validator
+    include Runtime
+
     class Exception < StandardError; end
     class UnexpectedType < Exception; end
     class UnexpectedProperty < Exception; end
@@ -229,12 +233,6 @@ module YAMLSchema
       if schema["maxLength"]
         raise InvalidSchema, "\"maxLength\" must be an Integer#{_sp path}" unless Integer === schema["maxLength"]
       end
-    end
-
-    def make_error klass, msg, path
-      ex = klass.new msg + " path: /#{path.join("/")}"
-      ex.set_backtrace caller
-      ex
     end
 
     def _validate type, schema, node, valid, aliases, path, allow_aliases
@@ -410,71 +408,6 @@ module YAMLSchema
       end
 
       valid
-    end
-
-    # Taken from http://yaml.org/type/timestamp.html
-    TIME = /^-?\d{4}-\d{1,2}-\d{1,2}(?:[Tt]|\s+)\d{1,2}:\d\d:\d\d(?:\.\d*)?(?:\s*(?:Z|[-+]\d{1,2}:?(?:\d\d)?))?$/
-
-    # Taken from http://yaml.org/type/float.html
-    # Base 60, [-+]inf and NaN are handled separately
-    FLOAT = /^(?:[-+]?([0-9][0-9_,]*)?\.[0-9]*([eE][-+][0-9]+)?(?# base 10))$/x
-
-    # Taken from http://yaml.org/type/int.html and modified to ensure at least one numerical symbol exists
-    INTEGER_STRICT = /^(?:[-+]?0b[_]*[0-1][0-1_]*             (?# base 2)
-                         |[-+]?0[_]*[0-7][0-7_]*              (?# base 8)
-                         |[-+]?(0|[1-9][0-9_]*)               (?# base 10)
-                         |[-+]?0x[_]*[0-9a-fA-F][0-9a-fA-F_]* (?# base 16))$/x
-
-    def extract_type string
-      Validator.extract_type string
-    end
-
-    # Tokenize +string+ returning the Ruby object
-    def self.extract_type string
-      return :null if string.empty?
-      # Check for a String type, being careful not to get caught by hash keys, hex values, and
-      # special floats (e.g., -.inf).
-      if string.match?(%r{^[^\d.:-]?[[:alpha:]_\s!@#$%\^&*(){}<>|/\\~;=]+}) || string.match?(/\n/)
-        return :string if string.length > 5
-
-        if string.match?(/^[^ytonf~]/i)
-          :string
-        elsif string == '~' || string.match?(/^null$/i)
-          :null
-        elsif string.match?(/^(yes|true|on)$/i)
-          :boolean
-        elsif string.match?(/^(no|false|off)$/i)
-          :boolean
-        else
-          :string
-        end
-      elsif string.match?(TIME)
-        :time
-      elsif string.match?(/^\d{4}-(?:1[012]|0\d|\d)-(?:[12]\d|3[01]|0\d|\d)$/)
-        :date
-      elsif string.match?(/^\+?\.inf$/i)
-        :float
-      elsif string.match?(/^-\.inf$/i)
-        :float
-      elsif string.match?(/^\.nan$/i)
-        :float
-      elsif string.match?(/^:./)
-        :symbol
-      elsif string.match?(/^[-+]?[0-9][0-9_]*(:[0-5]?[0-9]){1,2}$/)
-        :sexagesimal
-      elsif string.match?(/^[-+]?[0-9][0-9_]*(:[0-5]?[0-9]){1,2}\.[0-9_]*$/)
-        :sexagesimal
-      elsif string.match?(FLOAT)
-        if string.match?(/\A[-+]?\.\Z/)
-          :string
-        else
-          :float
-        end
-      elsif string.match?(INTEGER_STRICT)
-        :integer
-      else
-        :string
-      end
     end
   end
 end

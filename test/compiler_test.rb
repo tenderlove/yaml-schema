@@ -2,6 +2,8 @@ require "minitest/autorun"
 require "yaml-schema"
 require "psych"
 require "tmpdir"
+require "open3"
+require "rbconfig"
 
 module YAMLSchema
   class CompilerTest < Minitest::Test
@@ -79,6 +81,22 @@ module YAMLSchema
       [:crash, e.class]
     end
 
+    # Stand-alone validators define their own exception classes, so compare
+    # exceptions by their unqualified names.
+    def loose_outcome
+      [:ok, yield]
+    rescue => e
+      # An exception raised without a message uses its class name as the message
+      message = e.message == e.class.name ? :default : e.message
+      [e.class.name.split("::").last, message]
+    end
+
+    def standalone_validator schema
+      mod = Module.new
+      mod.module_eval Compiler.to_ruby(schema, class_name: "Validator", standalone: true)
+      mod::Validator
+    end
+
     def test_compiled_matches_interpreter
       SCHEMAS.each do |schema|
         compiled = Compiler.compile(schema)
@@ -94,6 +112,48 @@ module YAMLSchema
             assert_equal expected, actual, "invalid? schema=#{schema.inspect} yaml=#{yaml.inspect}"
           end
         end
+      end
+    end
+
+    def test_standalone_matches_interpreter
+      SCHEMAS.each do |schema|
+        standalone = standalone_validator(schema)
+        refute_operator standalone, :<, CompiledValidator
+
+        DOCUMENTS.each do |yaml|
+          node = Psych.parse("---\n#{yaml}").children.first
+          [true, false].each do |aliases|
+            expected = loose_outcome { Validator.validate(schema, node, aliases: aliases) }
+            actual   = loose_outcome { standalone.validate(node, aliases: aliases) }
+            assert_equal expected, actual, "schema=#{schema.inspect} yaml=#{yaml.inspect} aliases=#{aliases}"
+          end
+        end
+      end
+    end
+
+    def test_standalone_runs_without_yaml_schema
+      schema = { "type" => "object", "properties" => { "age" => { "type" => "integer" } } }
+      script = <<~'RUBY'
+        require "psych"
+        load ARGV.fetch(0)
+        abort "yaml-schema was loaded" if defined?(YAMLSchema)
+        puts AgeValidator.validate(Psych.parse("age: 1").children.first)
+        begin
+          AgeValidator.validate(Psych.parse("age: x").children.first)
+        rescue AgeValidator::UnexpectedValue => e
+          puts e.message
+        end
+      RUBY
+
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "age_validator.rb")
+        File.write path, Compiler.to_ruby(schema, class_name: "AgeValidator", standalone: true)
+
+        # Clear RUBYOPT so bundler/setup doesn't load the gemspec (which requires yaml-schema)
+        env = { "RUBYOPT" => nil, "RUBYLIB" => nil }
+        out, err, status = Open3.capture3(env, RbConfig.ruby, "--disable-gems", "-e", script, path)
+        assert status.success?, err
+        assert_equal "true\nexpected integer, got string path: /age\n", out
       end
     end
 
@@ -114,7 +174,8 @@ module YAMLSchema
     end
 
     def test_custom_node_info
-      info = Class.new { def read_tag(node) = node.tag == "!aaron" ? "test" : node.tag }.new
+      info = Object.new
+      def info.read_tag(node); node.tag == "!aaron" ? "test" : node.tag; end
       v = Compiler.compile({ "type" => "object", "tag" => "test", "properties" => { "foo" => { "type" => "string" } } })
       node = Psych.parse("--- !aaron\nfoo: bar").children.first
       assert v.new(info).validate(node)

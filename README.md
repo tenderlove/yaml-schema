@@ -108,6 +108,17 @@ File.write "person_validator.rb",
   YAMLSchema::Compiler.to_ruby(schema, class_name: "PersonValidator")
 ```
 
+Pass `standalone: true` to generate a validator that doesn't depend on
+yaml-schema at all. Stand-alone validators define their own exception classes
+(`PersonValidator::UnexpectedType`, etc., all subclasses of
+`PersonValidator::Exception`) instead of raising `YAMLSchema::Validator`
+exceptions:
+
+```ruby
+File.write "person_validator.rb",
+  YAMLSchema::Compiler.to_ruby(schema, class_name: "PersonValidator", standalone: true)
+```
+
 ## Error Handling
 
 Validation errors include detailed path information:
