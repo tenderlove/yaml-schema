@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "yaml-schema/runtime"
+
 module YAMLSchema
   VERSION = "1.2.1"
 
@@ -63,6 +65,8 @@ module YAMLSchema
   end
 
   class Validator
+    include Runtime
+
     class Exception < StandardError; end
     class UnexpectedType < Exception; end
     class UnexpectedProperty < Exception; end
@@ -95,10 +99,13 @@ module YAMLSchema
 
     INSTANCE = new.freeze
 
+    VALID_TYPES = %w[object array string integer float boolean null date time symbol].freeze
+
     ##
     # Given a particular schema, validate that the node conforms to the
     # schema. Raises an exception if it is invalid
     def validate schema, node, aliases: true
+      validate_schema!(schema)
       val = _validate(schema["type"], schema, node, Valid, {}, [], aliases)
       if val.exception
         raise val
@@ -111,6 +118,7 @@ module YAMLSchema
     # Given a particular schema, validate that the node conforms to the
     # schema. Returns an error object if the node is invalid, otherwise false.
     def invalid? schema, node, aliases: true
+      validate_schema!(schema)
       res = _validate(schema["type"], schema, node, Valid, {}, [], aliases)
       if Valid == res
         false
@@ -119,12 +127,112 @@ module YAMLSchema
       end
     end
 
+    ##
+    # Validates a schema definition, raising InvalidSchema if it is malformed.
+    def validate_schema! schema, path = ""
+      raise InvalidSchema, "schema must be a Hash#{_sp path}" unless Hash === schema
+
+      type = schema["type"]
+      raise InvalidSchema, "schema must have a \"type\" key#{_sp path}" unless type
+
+      types = Array === type ? type : [type]
+      types.each do |t|
+        raise InvalidSchema, "type must be a String, got #{t.class}#{_sp path}" unless String === t
+        raise InvalidSchema, "unknown type #{t.dump}#{_sp path}" unless VALID_TYPES.include?(t)
+      end
+
+      if schema["tag"]
+        raise InvalidSchema, "\"tag\" must be a String#{_sp path}" unless String === schema["tag"]
+      end
+
+      if schema["pattern"]
+        raise InvalidSchema, "\"pattern\" must be a Regexp#{_sp path}" unless Regexp === schema["pattern"]
+      end
+
+      types.each do |t|
+        case t
+        when "object"
+          _validate_object_schema(schema, path)
+        when "array"
+          _validate_array_schema(schema, path)
+        else
+          _validate_scalar_schema(schema, path)
+        end
+      end
+    end
+
     private
 
-    def make_error klass, msg, path
-      ex = klass.new msg + " path: /#{path.join("/")}"
-      ex.set_backtrace caller
-      ex
+    def _sp path
+      path.empty? ? "" : " at #{path}"
+    end
+
+    def _validate_object_schema schema, path
+      if schema["properties"]
+        raise InvalidSchema, "\"properties\" must be a Hash#{_sp path}" unless Hash === schema["properties"]
+        schema["properties"].each do |key, sub|
+          raise InvalidSchema, "property name must be a String#{_sp path}" unless String === key
+          validate_schema!(sub, "#{path}/#{key}")
+        end
+      elsif schema["items"]
+        # items-based object (homogeneous key-value)
+      else
+        raise InvalidSchema, "objects must specify \"items\" or \"properties\"#{_sp path}"
+      end
+
+      if schema["items"] && !schema["properties"]
+        raise InvalidSchema, "\"items\" must be a Hash#{_sp path}" unless Hash === schema["items"]
+        validate_schema!(schema["items"], "#{path}/items")
+      end
+
+      if schema["additionalProperties"]
+        raise InvalidSchema, "\"additionalProperties\" must be a Hash#{_sp path}" unless Hash === schema["additionalProperties"]
+        validate_schema!(schema["additionalProperties"], "#{path}/additionalProperties")
+      end
+
+      if schema["propertyNames"]
+        raise InvalidSchema, "\"propertyNames\" must be a Hash#{_sp path}" unless Hash === schema["propertyNames"]
+        validate_schema!(schema["propertyNames"], "#{path}/propertyNames") if schema["propertyNames"]["type"]
+      end
+
+      if schema["required"]
+        raise InvalidSchema, "\"required\" must be an Array#{_sp path}" unless Array === schema["required"]
+        schema["required"].each do |r|
+          raise InvalidSchema, "\"required\" entries must be Strings#{_sp path}" unless String === r
+        end
+      end
+    end
+
+    def _validate_array_schema schema, path
+      if schema["items"]
+        raise InvalidSchema, "\"items\" must be a Hash#{_sp path}" unless Hash === schema["items"]
+        validate_schema!(schema["items"], "#{path}/items")
+      elsif schema["prefixItems"]
+        raise InvalidSchema, "\"prefixItems\" must be an Array#{_sp path}" unless Array === schema["prefixItems"]
+        schema["prefixItems"].each_with_index do |sub, i|
+          validate_schema!(sub, "#{path}/prefixItems/#{i}")
+        end
+      else
+        raise InvalidSchema, "arrays must specify \"items\" or \"prefixItems\"#{_sp path}"
+      end
+
+      if schema["minItems"]
+        raise InvalidSchema, "\"minItems\" must be an Integer#{_sp path}" unless Integer === schema["minItems"]
+      end
+
+      if schema["maxItems"]
+        raise InvalidSchema, "\"maxItems\" must be an Integer#{_sp path}" unless Integer === schema["maxItems"]
+      end
+    end
+
+    def _validate_scalar_schema schema, path
+      if schema["minLength"]
+        raise InvalidSchema, "\"minLength\" must be an Integer#{_sp path}" unless Integer === schema["minLength"]
+      end
+
+      if schema["maxLength"]
+        raise InvalidSchema, "\"maxLength\" must be an Integer#{_sp path}" unless Integer === schema["maxLength"]
+      end
     end
 
     def _validate type, schema, node, valid, aliases, path, allow_aliases
@@ -235,7 +343,8 @@ module YAMLSchema
             valid = _validate sub_schema["type"], sub_schema, item, valid, aliases, path + [i], allow_aliases
           }
         elsif schema["prefixItems"]
-          node.children.each_with_index { |item, i|
+          # Items beyond the end of prefixItems are not validated
+          node.children.first(schema["prefixItems"].length).each_with_index { |item, i|
             sub_schema = schema["prefixItems"][i]
             valid = _validate sub_schema["type"], sub_schema, item, valid, aliases, path + [i], allow_aliases
           }
@@ -300,66 +409,7 @@ module YAMLSchema
 
       valid
     end
-
-    # Taken from http://yaml.org/type/timestamp.html
-    TIME = /^-?\d{4}-\d{1,2}-\d{1,2}(?:[Tt]|\s+)\d{1,2}:\d\d:\d\d(?:\.\d*)?(?:\s*(?:Z|[-+]\d{1,2}:?(?:\d\d)?))?$/
-
-    # Taken from http://yaml.org/type/float.html
-    # Base 60, [-+]inf and NaN are handled separately
-    FLOAT = /^(?:[-+]?([0-9][0-9_,]*)?\.[0-9]*([eE][-+][0-9]+)?(?# base 10))$/x
-
-    # Taken from http://yaml.org/type/int.html and modified to ensure at least one numerical symbol exists
-    INTEGER_STRICT = /^(?:[-+]?0b[_]*[0-1][0-1_]*             (?# base 2)
-                         |[-+]?0[_]*[0-7][0-7_]*              (?# base 8)
-                         |[-+]?(0|[1-9][0-9_]*)               (?# base 10)
-                         |[-+]?0x[_]*[0-9a-fA-F][0-9a-fA-F_]* (?# base 16))$/x
-
-    # Tokenize +string+ returning the Ruby object
-    def extract_type string
-      return :null if string.empty?
-      # Check for a String type, being careful not to get caught by hash keys, hex values, and
-      # special floats (e.g., -.inf).
-      if string.match?(%r{^[^\d.:-]?[[:alpha:]_\s!@#$%\^&*(){}<>|/\\~;=]+}) || string.match?(/\n/)
-        return :string if string.length > 5
-
-        if string.match?(/^[^ytonf~]/i)
-          :string
-        elsif string == '~' || string.match?(/^null$/i)
-          :null
-        elsif string.match?(/^(yes|true|on)$/i)
-          :boolean
-        elsif string.match?(/^(no|false|off)$/i)
-          :boolean
-        else
-          :string
-        end
-      elsif string.match?(TIME)
-        :time
-      elsif string.match?(/^\d{4}-(?:1[012]|0\d|\d)-(?:[12]\d|3[01]|0\d|\d)$/)
-        :date
-      elsif string.match?(/^\+?\.inf$/i)
-        :float
-      elsif string.match?(/^-\.inf$/i)
-        :float
-      elsif string.match?(/^\.nan$/i)
-        :float
-      elsif string.match?(/^:./)
-        :symbol
-      elsif string.match?(/^[-+]?[0-9][0-9_]*(:[0-5]?[0-9]){1,2}$/)
-        :sexagesimal
-      elsif string.match?(/^[-+]?[0-9][0-9_]*(:[0-5]?[0-9]){1,2}\.[0-9_]*$/)
-        :sexagesimal
-      elsif string.match?(FLOAT)
-        if string.match?(/\A[-+]?\.\Z/)
-          :string
-        else
-          :float
-        end
-      elsif string.match?(INTEGER_STRICT)
-        :integer
-      else
-        :string
-      end
-    end
   end
 end
+
+require "yaml-schema/compiler"
